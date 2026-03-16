@@ -1,6 +1,5 @@
 package com.sirius.agents_demo;
 
-import com.sirius.agents_demo.a2a.AgentRegistration;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.ToolCallAdvisor;
@@ -25,12 +24,12 @@ import org.springaicommunity.agent.tools.task.TaskTool;
 import org.springaicommunity.agent.utils.AgentEnvironment;
 import org.springframework.ai.tool.ToolCallback;
 
-import java.util.Map;
+import java.util.List;
 
 /**
- * Builds the orchestratorChatClient with a TaskTool wired to A2A subagent endpoints.
+ * Builds the orchestratorChatClient with a TaskTool wired to remote A2A subagent endpoints.
  * <p>
- * The orchestrator delegates to specialist agents over A2A:
+ * The orchestrator delegates to specialist agents running on the A2A agents service (port 3030):
  * <ol>
  *   <li>info-fetch</li>
  *   <li>initial-assessment</li>
@@ -41,19 +40,24 @@ import java.util.Map;
 @Configuration
 public class OrchestratorConfig {
 
-    //https://github.com/spring-ai-community/spring-ai-agent-utils/blob/main/spring-ai-agent-utils/docs/SkillsTool.md
+    private static final String A2A_AGENTS_BASE_URL = "http://localhost:3030/agents/";
+
+    private static final List<String> AGENT_IDS = List.of(
+            "info-fetch",
+            "initial-assessment",
+            "risk-assessment",
+            "synthesis"
+    );
 
     @Bean
     @Lazy
     public ChatClient orchestratorChatClient(
             ChatClient.Builder builder,
             @Value("${agent.model}") String agentModel,
-            @Value("${server.port:2020}") int serverPort,
             @Value("classpath:/prompt/agents/orchestrator.md") Resource systemPrompt,
-            @Value("classpath:/skills/supplier-synthesis") Resource skillDir,
-            Map<String, AgentRegistration> agentRegistrationMap) {
+            @Value("classpath:/skills/supplier-synthesis") Resource skillDir) {
 
-        ToolCallback taskTool = buildTaskTool(serverPort, agentRegistrationMap);
+        ToolCallback taskTool = buildTaskTool();
 
         return builder.clone()
                 .defaultSystem(p -> p.text(systemPrompt)
@@ -75,13 +79,12 @@ public class OrchestratorConfig {
                 .build();
     }
 
-    private ToolCallback buildTaskTool(int serverPort, Map<String, AgentRegistration> registrations) {
+    private ToolCallback buildTaskTool() {
         TaskTool.Builder taskToolBuilder = TaskTool.builder()
                 .subagentTypes(new SubagentType(new A2ASubagentResolver(), new A2ASubagentExecutor()));
 
-        // Register each specialist agent as an A2A subagent reference
-        for (String agentId : registrations.keySet()) {
-            String agentUrl = "http://localhost:" + serverPort + "/agents/" + agentId;
+        for (String agentId : AGENT_IDS) {
+            String agentUrl = A2A_AGENTS_BASE_URL + agentId;
             taskToolBuilder.subagentReferences(
                     new SubagentReference(agentUrl, A2ASubagentDefinition.KIND));
         }
