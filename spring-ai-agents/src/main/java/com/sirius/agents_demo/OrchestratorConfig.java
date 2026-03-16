@@ -14,13 +14,17 @@ import org.springaicommunity.agent.common.task.subagent.SubagentType;
 import org.springaicommunity.agent.subagent.a2a.A2ASubagentDefinition;
 import org.springaicommunity.agent.subagent.a2a.A2ASubagentExecutor;
 import org.springaicommunity.agent.subagent.a2a.A2ASubagentResolver;
+import org.springaicommunity.agent.common.task.subagent.SubagentExecutor;
 import org.springaicommunity.agent.tools.FileSystemTools;
 import org.springaicommunity.agent.tools.GlobTool;
 import org.springaicommunity.agent.tools.GrepTool;
 import org.springaicommunity.agent.tools.ShellTools;
 import org.springaicommunity.agent.tools.SkillsTool;
 import org.springaicommunity.agent.tools.TodoWriteTool;
+import org.springaicommunity.agent.tools.task.TaskOutputTool;
 import org.springaicommunity.agent.tools.task.TaskTool;
+import org.springaicommunity.agent.tools.task.repository.DefaultTaskRepository;
+import org.springaicommunity.agent.tools.task.repository.TaskRepository;
 import org.springaicommunity.agent.utils.AgentEnvironment;
 import org.springframework.ai.tool.ToolCallback;
 
@@ -49,6 +53,12 @@ public class OrchestratorConfig {
             "synthesis"
     );
 
+    private final PipelineProgressTracker progressTracker;
+
+    public OrchestratorConfig(PipelineProgressTracker progressTracker) {
+        this.progressTracker = progressTracker;
+    }
+
     @Bean
     @Lazy
     public ChatClient orchestratorChatClient(
@@ -57,7 +67,11 @@ public class OrchestratorConfig {
             @Value("classpath:/prompt/agents/orchestrator.md") Resource systemPrompt,
             @Value("classpath:/skills/supplier-synthesis") Resource skillDir) {
 
-        ToolCallback taskTool = buildTaskTool();
+        TaskRepository taskRepository = new DefaultTaskRepository();
+        ToolCallback taskTool = buildTaskTool(taskRepository);
+        ToolCallback taskOutputTool = TaskOutputTool.builder()
+                .taskRepository(taskRepository)
+                .build();
 
         return builder.clone()
                 .defaultSystem(p -> p.text(systemPrompt)
@@ -75,13 +89,16 @@ public class OrchestratorConfig {
                         TodoWriteTool.builder().build())
                 .defaultToolCallbacks(
                         SkillsTool.builder().addSkillsResource(skillDir).build())
-                .defaultToolCallbacks(taskTool)
+                .defaultToolCallbacks(taskTool, taskOutputTool)
                 .build();
     }
 
-    private ToolCallback buildTaskTool() {
+    private ToolCallback buildTaskTool(TaskRepository taskRepository) {
+        SubagentExecutor trackedExecutor = new TrackedSubagentExecutor(
+                new A2ASubagentExecutor(), progressTracker);
         TaskTool.Builder taskToolBuilder = TaskTool.builder()
-                .subagentTypes(new SubagentType(new A2ASubagentResolver(), new A2ASubagentExecutor()));
+                .taskRepository(taskRepository)
+                .subagentTypes(new SubagentType(new A2ASubagentResolver(), trackedExecutor));
 
         for (String agentId : AGENT_IDS) {
             String agentUrl = A2A_AGENTS_BASE_URL + agentId;

@@ -7,15 +7,19 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 public class ChatController {
 
     private final ChatClient orchestratorChatClient;
+    private final PipelineProgressTracker progressTracker;
 
     public ChatController(
-            @Lazy @Qualifier("orchestratorChatClient") ChatClient orchestratorChatClient) {
+            @Lazy @Qualifier("orchestratorChatClient") ChatClient orchestratorChatClient,
+            PipelineProgressTracker progressTracker) {
         this.orchestratorChatClient = orchestratorChatClient;
+        this.progressTracker = progressTracker;
     }
 
     /**
@@ -30,5 +34,14 @@ public class ChatController {
                 .user(message)
                 .call()
                 .content();
+    }
+
+    /**
+     * SSE stream for real-time pipeline progress events.
+     * The frontend subscribes before sending a chat request.
+     */
+    @GetMapping(value = "/chat/progress", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter progress() {
+        return progressTracker.subscribe();
     }
 }

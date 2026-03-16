@@ -365,6 +365,132 @@
     #sendBtn:disabled { opacity: .5; cursor: not-allowed; }
 
     .hint { font-size: 11px; color: var(--muted); padding: 0 24px 10px; text-align: center; }
+
+    /* ── Pipeline progress tracker ─────────────────────────────────── */
+    .pipeline-tracker {
+      background: var(--bot-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-bottom-left-radius: 4px;
+      padding: 16px 20px;
+      min-width: 320px;
+    }
+    .pipeline-tracker .pt-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--accent);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .pipeline-tracker .pt-title .pt-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .pipeline-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 8px 0;
+      position: relative;
+    }
+    .pipeline-step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 13px;
+      top: 34px;
+      bottom: -8px;
+      width: 2px;
+      background: var(--border);
+      transition: background .4s;
+    }
+    .pipeline-step.completed:not(:last-child)::after {
+      background: #22c55e;
+    }
+    .pipeline-step.in-progress:not(:last-child)::after {
+      background: linear-gradient(180deg, var(--accent) 0%, var(--border) 100%);
+    }
+
+    .step-icon {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      display: grid; place-items: center;
+      flex-shrink: 0;
+      font-size: 13px;
+      transition: all .4s ease;
+      position: relative;
+      z-index: 1;
+    }
+    .pipeline-step.pending .step-icon {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      color: var(--muted);
+    }
+    .pipeline-step.in-progress .step-icon {
+      background: rgba(59,130,246,.15);
+      border: 2px solid var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 12px rgba(59,130,246,.3);
+      animation: pulse-icon 1.5s ease infinite;
+    }
+    @keyframes pulse-icon {
+      0%,100% { box-shadow: 0 0 8px rgba(59,130,246,.2); }
+      50%     { box-shadow: 0 0 18px rgba(59,130,246,.5); }
+    }
+    .pipeline-step.completed .step-icon {
+      background: rgba(34,197,94,.15);
+      border: 2px solid #22c55e;
+      color: #22c55e;
+    }
+
+    .step-info { flex: 1; padding-top: 3px; }
+    .step-label {
+      font-size: 13px;
+      font-weight: 600;
+      transition: color .3s;
+    }
+    .pipeline-step.pending .step-label   { color: var(--muted); }
+    .pipeline-step.in-progress .step-label { color: var(--text); }
+    .pipeline-step.completed .step-label { color: #86efac; }
+
+    .step-desc {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .pipeline-step.in-progress .step-desc {
+      color: var(--accent);
+    }
+
+    .step-check {
+      display: none;
+    }
+    .pipeline-step.completed .step-check {
+      display: inline;
+    }
+    .pipeline-step.completed .step-emoji {
+      display: none;
+    }
+    .pipeline-step.in-progress .step-spinner {
+      display: inline-block;
+    }
+    .step-spinner {
+      display: none;
+      width: 12px; height: 12px;
+      border: 2px solid transparent;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
   </style>
 </head>
 <body>
@@ -418,6 +544,14 @@
 
   let activeAgent = 'orchestrator';
 
+  // ── Pipeline step definitions (in order) ───────────────────────────
+  const PIPELINE_STEPS = [
+    { id: 'info-fetch',          emoji: '🔍', label: 'Info Fetch',          desc: 'Gathering digital evidence from public sources' },
+    { id: 'initial-assessment',  emoji: '📋', label: 'Initial Assessment',  desc: 'Building structured supplier profile' },
+    { id: 'risk-assessment',     emoji: '⚠️', label: 'Risk Assessment',     desc: 'Scoring risk across key dimensions' },
+    { id: 'synthesis',           emoji: '📊', label: 'Synthesis',           desc: 'Consolidating final recommendation' },
+  ];
+
   // ── Tab switching ──────────────────────────────────────────────────
   tabsEl.addEventListener('click', e => {
     const tab = e.target.closest('.tab');
@@ -450,6 +584,129 @@
     inputEl.focus();
   }
 
+  // ── Pipeline progress tracker DOM ──────────────────────────────────
+  let currentTrackerEl = null;
+  let progressEventSource = null;
+
+  function showPipelineTracker() {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg bot';
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = '🧠';
+
+    const tracker = document.createElement('div');
+    tracker.className = 'pipeline-tracker';
+
+    const title = document.createElement('div');
+    title.className = 'pt-title';
+    title.innerHTML = '<span class="pt-spinner"></span> Evaluation Pipeline';
+    tracker.appendChild(title);
+
+    for (const step of PIPELINE_STEPS) {
+      const stepEl = document.createElement('div');
+      stepEl.className = 'pipeline-step pending';
+      stepEl.dataset.stepId = step.id;
+
+      stepEl.innerHTML = `
+        <div class="step-icon">
+          <span class="step-emoji">${step.emoji}</span>
+          <span class="step-check">✓</span>
+          <span class="step-spinner"></span>
+        </div>
+        <div class="step-info">
+          <div class="step-label">${step.label}</div>
+          <div class="step-desc">${step.desc}</div>
+        </div>
+      `;
+      tracker.appendChild(stepEl);
+    }
+
+    wrap.appendChild(avatar);
+    wrap.appendChild(tracker);
+    messagesEl.appendChild(wrap);
+    scrollToBottom();
+    currentTrackerEl = tracker;
+    return wrap;
+  }
+
+  function updateStepStatus(agentId, status) {
+    if (!currentTrackerEl) return;
+    // Find the index of the target step in the pipeline order
+    const stepIndex = PIPELINE_STEPS.findIndex(s => s.id === agentId);
+    if (stepIndex < 0) return;
+
+    // Enforce visual ordering: when a step reaches a state, all earlier
+    // steps must be at least at that state (or higher).
+    // Priority: completed > in-progress > pending
+    const priority = { 'pending': 0, 'in-progress': 1, 'completed': 2 };
+
+    for (let i = 0; i <= stepIndex; i++) {
+      const sid = PIPELINE_STEPS[i].id;
+      const el = currentTrackerEl.querySelector(`[data-step-id="${sid}"]`);
+      if (!el) continue;
+
+      const currentStatus = el.classList.contains('completed') ? 'completed'
+                          : el.classList.contains('in-progress') ? 'in-progress'
+                          : 'pending';
+
+      // For earlier steps: promote to at least 'completed' if target is completing,
+      // or 'in-progress' if target is starting
+      const requiredStatus = (i < stepIndex) ? (status === 'completed' ? 'completed' : 'in-progress')
+                                             : status;
+
+      if (priority[requiredStatus] > priority[currentStatus]) {
+        el.className = `pipeline-step ${requiredStatus}`;
+      }
+    }
+    scrollToBottom();
+  }
+
+  function markTrackerDone() {
+    if (!currentTrackerEl) return;
+    const spinner = currentTrackerEl.querySelector('.pt-spinner');
+    if (spinner) spinner.style.display = 'none';
+    const title = currentTrackerEl.querySelector('.pt-title');
+    if (title) title.innerHTML = '✅ Pipeline Complete';
+  }
+
+  // ── SSE progress connection ────────────────────────────────────────
+  function connectProgress() {
+    return new Promise((resolve) => {
+      if (progressEventSource) {
+        progressEventSource.close();
+      }
+      const es = new EventSource('/chat/progress');
+      progressEventSource = es;
+
+      es.addEventListener('step-started', e => {
+        const data = JSON.parse(e.data);
+        updateStepStatus(data.agentId, 'in-progress');
+      });
+
+      es.addEventListener('step-completed', e => {
+        const data = JSON.parse(e.data);
+        updateStepStatus(data.agentId, 'completed');
+      });
+
+      es.addEventListener('pipeline-done', () => {
+        markTrackerDone();
+      });
+
+      es.onerror = () => {
+        es.close();
+        progressEventSource = null;
+      };
+
+      // Wait for the connection to open before resolving
+      es.onopen = () => resolve(es);
+
+      // Safety: resolve after 2s even if onopen didn't fire
+      setTimeout(() => resolve(es), 2000);
+    });
+  }
+
   // ── Send message ───────────────────────────────────────────────────
   async function sendMessage() {
     const text = inputEl.value.trim();
@@ -462,20 +719,48 @@
     inputEl.style.height = 'auto';
     sendBtn.disabled = true;
 
-    const typingId = showTyping();
+    // Show pipeline tracker for orchestrator evaluation requests
+    const isEval = activeAgent === 'orchestrator' && /evaluat/i.test(text);
+    let trackerWrap = null;
+    if (isEval) {
+      trackerWrap = showPipelineTracker();
+      await connectProgress(); // wait for SSE channel to open
+    } else {
+      showTyping();
+    }
 
     try {
       const url = buildUrl(activeAgent, text);
       const resp = await fetch(url);
       const reply = resp.ok ? await resp.text() : `Error ${resp.status}: ${await resp.text()}`;
-      removeTyping(typingId);
+
+      if (isEval) {
+        markTrackerDone();
+      } else {
+        removeAllTyping();
+      }
+
+      if (progressEventSource) {
+        progressEventSource.close();
+        progressEventSource = null;
+      }
+
       appendMessage('bot', reply, activeAgent);
     } catch (err) {
-      removeTyping(typingId);
+      if (isEval) {
+        markTrackerDone();
+      } else {
+        removeAllTyping();
+      }
+      if (progressEventSource) {
+        progressEventSource.close();
+        progressEventSource = null;
+      }
       appendMessage('bot', `⚠️ Network error: ${err.message}`, activeAgent);
     } finally {
       sendBtn.disabled = false;
       inputEl.focus();
+      currentTrackerEl = null;
     }
   }
 
@@ -553,6 +838,10 @@
   function removeTyping(id) {
     const el = messagesEl.querySelector(`[data-typing-id="${id}"]`);
     if (el) el.remove();
+  }
+
+  function removeAllTyping() {
+    messagesEl.querySelectorAll('[data-typing-id]').forEach(el => el.remove());
   }
 
   function scrollToBottom() {
