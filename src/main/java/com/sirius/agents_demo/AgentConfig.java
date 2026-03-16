@@ -1,5 +1,6 @@
 package com.sirius.agents_demo;
 
+import com.sirius.agents_demo.tools.TavilySearchTool;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.ToolCallAdvisor;
@@ -9,46 +10,102 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.Resource;
 import org.springaicommunity.agent.tools.FileSystemTools;
-import org.springaicommunity.agent.tools.GlobTool;
-import org.springaicommunity.agent.tools.GrepTool;
-import org.springaicommunity.agent.tools.ShellTools;
 import org.springaicommunity.agent.tools.SkillsTool;
-import org.springaicommunity.agent.tools.TodoWriteTool;
 import org.springaicommunity.agent.utils.AgentEnvironment;
-
-import java.util.List;
 
 @Configuration
 public class AgentConfig {
 
+	// -------------------------------------------------------------------------
+	// InfoFetch agent: web search; minimal reasoning, no file write
+	// -------------------------------------------------------------------------
 	@Bean
-	public ChatClient agentChatClient(ChatClient.Builder builder,
-			@Value("${agent.model:gpt-4o}") String agentModel,
-			@Value("${agent.model.knowledge.cutoff:2025-01-01}") String knowledgeCutoff,
-			@Value("classpath:/prompt/agent-system-prompt.md") Resource systemPromptResource,
-			@Value("${agent.skills.paths:#{null}}") List<Resource> skillPaths) {
+	public ChatClient infoFetchChatClient(
+			ChatClient.Builder builder,
+			@Value("${agent.model}") String agentModel,
+			@Value("classpath:/prompt/agents/info-fetch.md") Resource systemPrompt,
+			@Value("classpath:/skills/supplier-info-fetch") Resource skillDir,
+			@Value("${tavily.api-key:}") String tavilyApiKey) {
 
-		var chatClientBuilder = builder
-				.defaultSystem(p -> p.text(systemPromptResource)
-						.param(AgentEnvironment.ENVIRONMENT_INFO_KEY, AgentEnvironment.info())
-						.param(AgentEnvironment.GIT_STATUS_KEY, AgentEnvironment.gitStatus())
-						.param(AgentEnvironment.AGENT_MODEL_KEY, agentModel)
-						.param(AgentEnvironment.AGENT_MODEL_KNOWLEDGE_CUTOFF_KEY, knowledgeCutoff))
-				.defaultTools(
-						ShellTools.builder().build(),
-						FileSystemTools.builder().build(),
-						GrepTool.builder().build(),
-						GlobTool.builder().build(),
-						TodoWriteTool.builder().build())
+		var clientBuilder = builder.clone()
+				.defaultSystem(p -> p.text(systemPrompt)
+						.param(AgentEnvironment.AGENT_MODEL_KEY, agentModel))
 				.defaultAdvisors(
 						ToolCallAdvisor.builder().conversationHistoryEnabled(false).build(),
-						MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().maxMessages(500).build()).build());
+						MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().maxMessages(100).build()).build())
+				.defaultToolCallbacks(
+						SkillsTool.builder().addSkillsResource(skillDir).build());
 
-		if (skillPaths != null && !skillPaths.isEmpty()) {
-			chatClientBuilder.defaultToolCallbacks(
-					SkillsTool.builder().addSkillsResources(skillPaths).build());
+		if (tavilyApiKey != null && !tavilyApiKey.isBlank()) {
+			clientBuilder.defaultTools(new TavilySearchTool(tavilyApiKey));
 		}
 
-		return chatClientBuilder.build();
+		return clientBuilder.build();
 	}
+
+	// -------------------------------------------------------------------------
+	// InitialAssessment agent: pure reasoning + template output
+	// -------------------------------------------------------------------------
+	@Bean
+	public ChatClient initialAssessmentChatClient(
+			ChatClient.Builder builder,
+			@Value("${agent.model}") String agentModel,
+			@Value("classpath:/prompt/agents/initial-assessment.md") Resource systemPrompt,
+			@Value("classpath:/skills/supplier-initial-assessment") Resource skillDir) {
+
+		return builder.clone()
+				.defaultSystem(p -> p.text(systemPrompt)
+						.param(AgentEnvironment.AGENT_MODEL_KEY, agentModel))
+				.defaultAdvisors(
+						ToolCallAdvisor.builder().conversationHistoryEnabled(false).build(),
+						MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().maxMessages(100).build()).build())
+				.defaultToolCallbacks(
+						SkillsTool.builder().addSkillsResource(skillDir).build())
+				.build();
+	}
+
+	// -------------------------------------------------------------------------
+	// RiskAssessment agent: risk rubric skill + structured scoring
+	// -------------------------------------------------------------------------
+	@Bean
+	public ChatClient riskAssessmentChatClient(
+			ChatClient.Builder builder,
+			@Value("${agent.model}") String agentModel,
+			@Value("classpath:/prompt/agents/risk-assessment.md") Resource systemPrompt,
+			@Value("classpath:/skills/supplier-risk-assessment") Resource skillDir) {
+
+		return builder.clone()
+				.defaultSystem(p -> p.text(systemPrompt)
+						.param(AgentEnvironment.AGENT_MODEL_KEY, agentModel))
+				.defaultAdvisors(
+						ToolCallAdvisor.builder().conversationHistoryEnabled(false).build(),
+						MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().maxMessages(100).build()).build())
+				.defaultToolCallbacks(
+						SkillsTool.builder().addSkillsResource(skillDir).build())
+				.build();
+	}
+
+	// -------------------------------------------------------------------------
+	// Synthesis agent: consolidation skill; can write the final report to disk
+	// -------------------------------------------------------------------------
+	@Bean
+	public ChatClient synthesisChatClient(
+			ChatClient.Builder builder,
+			@Value("${agent.model}") String agentModel,
+			@Value("classpath:/prompt/agents/synthesis.md") Resource systemPrompt,
+			@Value("classpath:/skills/supplier-synthesis") Resource skillDir) {
+
+		return builder.clone()
+				.defaultSystem(p -> p.text(systemPrompt)
+						.param(AgentEnvironment.AGENT_MODEL_KEY, agentModel))
+				.defaultAdvisors(
+						ToolCallAdvisor.builder().conversationHistoryEnabled(false).build(),
+						MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().maxMessages(100).build()).build())
+				.defaultTools(
+						FileSystemTools.builder().build())
+				.defaultToolCallbacks(
+						SkillsTool.builder().addSkillsResource(skillDir).build())
+				.build();
+	}
+
 }

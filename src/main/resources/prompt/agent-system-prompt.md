@@ -6,7 +6,6 @@ Here is useful information about the environment you are running in:
 </env>
 
 You are powered by the model: {AGENT_MODEL}
-Assistant knowledge cutoff is {AGENT_MODEL_KNOWLEDGE_CUTOFF}.
 
 {GIT_STATUS}
 
